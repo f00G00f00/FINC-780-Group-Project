@@ -1,0 +1,266 @@
+---
+title: "FINC 780 – Mean Variance Optimal Risky Portfolio Using Simulation"
+subtitle: "Group Assignment"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    toc_depth: 2
+    number_sections: true
+    code_folding: show
+    theme: flatly
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+# Introduction
+
+Portfolio optimization addresses the weight allocation problem: given a selected set of securities, how much capital should be assigned to each? This assignment uses the mean-variance framework to find weight combinations that are not dominated by alternatives. That is to say, no other portfolio offers higher return for the same risk or lower risk for the same return.
+
+Rather than analytical quadratic optimization, we used a simulation approach: we generated 100N random weight vectors, computed each portfolio's expected return and risk, and identified the Optimal Portfolio (highest Sharpe ratio) and the Minimum Variance Portfolio (MVP, lowest standard deviation).
+
+Data retrieval was performed using the `yfR` package, which provides adjusted closing prices by default and supports batch downloading of multiple tickers in a single call, offering a more robust and up-to-date alternative to `quantmod`.
+
+# Required Libraries
+
+```{r libraries}
+library(yfR)      # Stock price data (adjusted prices by default)
+library(tidyr)    # pivot_wider for reshaping yfR long format output
+library(ggplot2)  # Plotting
+library(dplyr)    # Data manipulation
+library(knitr)    # kable for formatted table output
+```
+
+# The myMeanVarPort Function
+
+The function accepts four inputs: `tickers`, `begin_date`, `end_date`, and `rf` (annual risk-free rate) and returns a named list containing the vector of stock means, the covariance matrix, and a data frame of simulated portfolio results (weights, mean, sigma, Sharpe ratio).
+
+`yfR::yf_get()` retrieves all tickers in a single call and returns monthly arithmetic returns on adjusted prices directly, removing the need for per-ticker loops or manual adjusted price extraction. The long format output is reshaped to wide format via `pivot_wider()` before any matrix calculations are performed.
+
+```{r function-definition}
+myMeanVarPort <- function(tickers, begin_date, end_date, rf) {
+
+  # Download monthly adjusted returns via yfR
+  df_long <- yf_get(tickers    = tickers,
+                    first_date  = begin_date,
+                    last_date   = end_date,
+                    freq_data   = "monthly",
+                    type_return = "arit",
+                    be_quiet    = TRUE)
+
+  # Reshape from long to wide format, preserve ticker order, drop NAs
+  retout <- df_long %>%
+    select(ref_date, ticker, ret_adjusted_prices) %>%
+    pivot_wider(names_from  = ticker,
+                values_from = ret_adjusted_prices) %>%
+    arrange(ref_date) %>%
+    select(all_of(tickers)) %>%
+    na.omit()
+
+  # Aggregate means and covariance matrix over the full period
+  meanret <- as.matrix(colMeans(retout))
+  covar   <- var(retout)
+
+  # Simulate 100*N random weight vectors (seed = 12)
+  n     <- length(tickers)
+  niter <- 100 * n
+  set.seed(12)
+  randomnums <- data.frame(replicate(n, runif(niter, 0, 1)))
+  wt_sim     <- randomnums / rowSums(randomnums)
+
+  # Convert annual rf to monthly before computing Sharpe ratios
+  rf_monthly <- rf / 12
+
+  # Compute portfolio mean, sigma, and Sharpe ratio for each simulation
+  weight  <- matrix(NA, nrow = n, ncol = 1)
+  Results <- matrix(NA, nrow = niter, ncol = n + 3)
+
+  for (i in 1:niter) {
+    for (k in 1:n) {
+      Results[i, k] <- weight[k, 1] <- wt_sim[i, k]
+    }
+    port_mean         <- t(weight) %*% meanret
+    port_sigma        <- sqrt(t(weight) %*% covar %*% weight)
+    sharpe            <- (port_mean - rf_monthly) / port_sigma
+    Results[i, n + 1] <- port_mean
+    Results[i, n + 2] <- port_sigma
+    Results[i, n + 3] <- sharpe
+  }
+
+  colnames(Results) <- c(paste0(tickers, "_wt"), "PortMean", "PortSigma", "Sharpe")
+
+  list(
+    stock_means    = round(meanret, 6),
+    cov_matrix     = round(covar, 8),
+    sim_portfolios = as.data.frame(Results)
+  )
+}
+```
+
+# Results
+
+## Function Inputs
+
+Per the assignment, the function was run with the required inputs below. With 7 securities, 700 portfolios were simulated (100 × 7).
+
+```{r run-function}
+tickers    <- c("GE", "XOM", "GBX", "SBUX", "PFE", "HMC", "NVDA")
+begin_date <- "2021-01-01"
+end_date   <- "2024-12-31"
+rf         <- 0.02
+
+port_output <- myMeanVarPort(tickers, begin_date, end_date, rf)
+Results     <- port_output$sim_portfolios
+```
+
+## Stock Means and Covariance Matrix
+
+The mean returns and covariance matrix are single aggregate values computed over the full sample period. The diagonal elements of the covariance matrix are individual stock variances; off-diagonal elements measure pairwise co-movement and drive diversification benefits.
+
+```{r means}
+cat("Mean Monthly Returns (2021-2024):\n")
+print(port_output$stock_means)
+```
+
+```{r covariance}
+cat("Variance-Covariance Matrix:\n")
+print(port_output$cov_matrix)
+```
+
+## Simulated Portfolios (First 10 Rows)
+
+```{r head-results}
+cat("Total portfolios simulated:", nrow(Results), "\n\n")
+kable(round(head(Results, 10), 5),
+      caption = "First 10 Simulated Portfolios",
+      align   = "r")
+```
+
+## Optimal and Minimum Variance Portfolios
+
+```{r optimal-mvp}
+opt_idx  <- which.max(Results$Sharpe)
+opt_port <- Results[opt_idx, ]
+
+mvp_idx  <- which.min(Results$PortSigma)
+mvp_port <- Results[mvp_idx, ]
+
+cat("OPTIMAL PORTFOLIO (Highest Sharpe)\n")
+cat(sprintf("  Portfolio Mean:  %.5f\n", opt_port$PortMean))
+cat(sprintf("  Portfolio Sigma: %.5f\n", opt_port$PortSigma))
+cat(sprintf("  Sharpe Ratio:    %.5f\n", opt_port$Sharpe))
+cat("  Weights:\n")
+for (t in tickers) cat(sprintf("    %-4s : %.2f%%\n", t,
+                                opt_port[[paste0(t, "_wt")]] * 100))
+
+cat("\nMINIMUM VARIANCE PORTFOLIO\n")
+cat(sprintf("  Portfolio Mean:  %.5f\n", mvp_port$PortMean))
+cat(sprintf("  Portfolio Sigma: %.5f\n", mvp_port$PortSigma))
+cat(sprintf("  Sharpe Ratio:    %.5f\n", mvp_port$Sharpe))
+cat("  Weights:\n")
+for (t in tickers) cat(sprintf("    %-4s : %.2f%%\n", t,
+                                mvp_port[[paste0(t, "_wt")]] * 100))
+```
+
+# Plots
+
+## Feasible Set
+
+The simulated portfolios form the characteristic "bullet" shape of the feasible set. Every plotted point is an achievable portfolio; the upper-left boundary is the efficient frontier.
+
+```{r plot-feasible, fig.width=8, fig.height=5}
+ggplot(Results, aes(x = PortSigma, y = PortMean)) +
+  geom_point(colour = "steelblue", alpha = 0.3, size = 1.2) +
+  labs(
+    title    = "Feasible Set of Simulated Portfolios",
+    subtitle = "GE, XOM, GBX, SBUX, PFE, HMC, NVDA | 2021-2024 | 700 Simulations",
+    x        = "Portfolio Sigma (Monthly Std Dev)",
+    y        = "Portfolio Mean (Monthly Return)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+## Optimal & Minimum Variance Portfolios
+
+The efficient frontier is traced by selecting the minimum-sigma portfolio within each return bin. The segment **above** the MVP (green triangle) constitutes the efficient frontier, the portion below it is dominated and therefore inefficient. The Optimal Portfolio (gold diamond) is the tangency point that maximises the Sharpe ratio.
+
+```{r plot-frontier, fig.width=8, fig.height=5}
+seqmret <- seq(round(min(Results$PortMean), 3) - .001,
+               max(Results$PortMean) + .001, .001)
+
+optim_frontier <- Results %>%
+  mutate(portnumber = row_number(),
+         ints       = cut(PortMean, breaks = seqmret)) %>%
+  group_by(ints) %>%
+  summarise(sig_optim  = min(PortSigma),
+            retn_optim = PortMean[which.min(PortSigma)],
+            .groups    = "drop") %>%
+  filter(!is.na(ints))
+
+ggplot() +
+  geom_point(data = Results, aes(x = PortSigma, y = PortMean),
+             colour = "steelblue", alpha = 0.2, size = 1.2) +
+  geom_line(data = optim_frontier, aes(x = sig_optim, y = retn_optim),
+            colour = "darkred", linewidth = 1.1) +
+  geom_point(data = opt_port, aes(x = PortSigma, y = PortMean),
+             colour = "gold", size = 5, shape = 18) +
+  geom_point(data = mvp_port, aes(x = PortSigma, y = PortMean),
+             colour = "green4", size = 5, shape = 17) +
+  annotate("text",
+           x     = opt_port$PortSigma + 0.001,
+           y     = opt_port$PortMean,
+           label = sprintf("Optimal Portfolio\n(Sharpe = %.3f)", opt_port$Sharpe),
+           hjust = 0, size = 3.2, colour = "darkgoldenrod") +
+  annotate("text",
+           x     = mvp_port$PortSigma + 0.001,
+           y     = mvp_port$PortMean,
+           label = sprintf("Min Variance Portfolio\n(\u03c3 = %.4f)", mvp_port$PortSigma),
+           hjust = 0, size = 3.2, colour = "green4") +
+  labs(
+    title    = "Mean-Variance Portfolio Optimization via Simulation",
+    subtitle = "GE, XOM, GBX, SBUX, PFE, HMC, NVDA | 2021-2024 | rf = 2% p.a.",
+    x        = "Portfolio Sigma (Monthly Std Dev)",
+    y        = "Portfolio Mean (Monthly Return)",
+    caption  = paste("Gold diamond = Optimal Portfolio (Max Sharpe)",
+                     "| Green triangle = Min Variance Portfolio")
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(plot.title   = element_text(face = "bold", size = 13),
+        plot.caption = element_text(size = 9, hjust = 0))
+```
+
+# Analysis and Discussion
+
+## Interpreting the Outputs
+
+**Stock means** reflect aggregate performance over 2021–2024. NVDA leads all stocks with a monthly mean of ~6.3%, driven by the AI semiconductor boom. GE and XOM also post strong positive means, reflecting industrial recovery and energy cycle tailwinds respectively. GBX and HMC offer moderate returns with cross-sector and international diversification. SBUX and PFE post near-zero or negative means over this period, reflecting consumer headwinds and post-pandemic pharmaceutical softness.
+
+**The feasible set** encompasses all 700 achievable portfolios. Its upper-left boundary is the efficient frontier — no portfolio on this boundary can be improved simultaneously in both return and risk. The **Optimal Portfolio** is the tangency point where a line from $r_f$ is tangent to the frontier, maximising the Sharpe ratio $\frac{\bar{r}_p - r_f}{\sigma_p}$. Note that only the efficient frontier segment **above** the MVP is truly non-dominated; portfolios below the MVP offer lower return for the same risk and are therefore inefficient.
+
+The **MVP** sits at the leftmost tip of the feasible set and is suited to investors who prioritise capital preservation above return.
+
+## Pros and Cons of the Simulation Method
+
+| | **Simulation** | **Quadratic Optimization** |
+|:---|:---|:---|
+| **Precision** | Approximate | Exact |
+| **Interpretability** | High — full feasible set visible | Low — solution only |
+| **Solver required** | No | Yes (`quadprog`, `PortfolioAnalytics`) |
+| **Scalability** | Poor for large N | Better |
+| **Constraints** | Simple (filter results) | Requires explicit specification |
+
+The key advantage of simulation is transparency; every portfolio is visible and comparable, and no black-box optimizer is needed. The key limitation is approximation: the portfolio identified as optimal depends on the random seed and simulation count, and random sampling may miss the true optimum in high-dimensional weight spaces. Critically, both methods share the same vulnerability to estimation risk. Small errors in mean returns or the covariance matrix can shift results substantially, since both rely on historical data that may not be predictive of future performance.
+
+# Conclusion
+
+This report demonstrates simulation-based mean-variance optimization using seven stocks (GE, XOM, GBX, SBUX, PFE, HMC, NVDA) over January 2021 to December 2024. Data retrieval was performed using the `yfR` package, which provides adjusted closing prices by default and enables batch downloading in a single function call. Generating 700 random portfolios with all return, sigma, and Sharpe values treated as aggregate figures across the full period which allowed us to visualize the feasible set, trace the efficient frontier, and identify both the Optimal Portfolio and the Minimum Variance Portfolio. The simulation approach is intuitive and requires no specialized solvers, making it a practical alternative to quadratic optimization at the cost of an approximate rather than exact solution.
