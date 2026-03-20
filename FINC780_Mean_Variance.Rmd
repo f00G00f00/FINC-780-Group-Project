@@ -1,3 +1,4 @@
+# EDIT - TRYING OUT GITHUB 
 ---
 title: "FINC 780 – Mean Variance Optimal Risky Portfolio Using Simulation"
 subtitle: "Group Assignment"
