@@ -42,10 +42,6 @@ library(knitr)    # kable for formatted table output
 
 # The myMeanVarPort Function
 
-The function accepts four inputs: `tickers`, `begin_date`, `end_date`, and `rf` (annual risk-free rate) and returns a named list containing the vector of stock means, the covariance matrix, and a data frame of simulated portfolio results (weights, mean, sigma, Sharpe ratio).
-
-`yfR::yf_get()` retrieves all tickers in a single call and returns monthly arithmetic returns on adjusted prices directly, removing the need for per-ticker loops or manual adjusted price extraction. The long format output is reshaped to wide format via `pivot_wider()` before any matrix calculations are performed.
-
 ```{r function-definition}
 myMeanVarPort <- function(tickers, begin_date, end_date, rf) {
 
@@ -105,6 +101,9 @@ myMeanVarPort <- function(tickers, begin_date, end_date, rf) {
   )
 }
 ```
+The function accepts four inputs: `tickers`, `begin_date`, `end_date`, and `rf` (annual risk-free rate) and returns a named list containing the vector of stock means, the covariance matrix, and a data frame of simulated portfolio results (weights, mean, sigma, Sharpe ratio).
+
+`yfR::yf_get()` retrieves all tickers in a single call and returns monthly arithmetic returns on adjusted prices directly, removing the need for per-ticker loops or manual adjusted price extraction. The long format output is reshaped to wide format via `pivot_wider()` before any matrix calculations are performed.
 
 # Results
 
