@@ -194,48 +194,74 @@ ggplot(Results, aes(x = PortSigma, y = PortMean)) +
 The efficient frontier is traced by selecting the minimum-sigma portfolio within each return bin. The segment **above** the MVP (green triangle) constitutes the efficient frontier, the portion below it is dominated and therefore inefficient. The Optimal Portfolio (gold diamond) is the tangency point that maximises the Sharpe ratio.
 
 ```{r plot-frontier, fig.width=8, fig.height=5}
-seqmret <- seq(round(min(Results$PortMean), 3) - .001,
-               max(Results$PortMean) + .001, .001)
+#  Create finer bins (smaller width) 
+seqmret <- seq(min(Results$PortMean),
+               max(Results$PortMean),
+               length.out = 200)   # instead of 0.001 steps
 
+#  Build efficient frontier 
 optim_frontier <- Results %>%
-  mutate(portnumber = row_number(),
-         ints       = cut(PortMean, breaks = seqmret)) %>%
+  mutate(ints = cut(PortMean, breaks = seqmret)) %>%
   group_by(ints) %>%
-  summarise(sig_optim  = min(PortSigma),
-            retn_optim = PortMean[which.min(PortSigma)],
-            .groups    = "drop") %>%
-  filter(!is.na(ints))
+  summarise(
+    sig_optim = min(PortSigma),
+    retn_optim = PortMean[which.min(PortSigma)],
+    .groups = "drop"
+  ) %>%
+  filter(!is.na(ints)) %>%
+  arrange(sig_optim)
 
+# Smooth the frontier 
+smooth_fit <- loess(retn_optim ~ sig_optim, data = optim_frontier, span = 0.2)
+
+smooth_curve <- data.frame(
+  sig_optim = seq(min(optim_frontier$sig_optim),
+                  max(optim_frontier$sig_optim),
+                  length.out = 300)
+)
+
+smooth_curve$retn_optim <- predict(smooth_fit, smooth_curve$sig_optim)
+
+# Plot 
 ggplot() +
-  geom_point(data = Results, aes(x = PortSigma, y = PortMean),
+  geom_point(data = Results,
+             aes(x = PortSigma, y = PortMean),
              colour = "steelblue", alpha = 0.2, size = 1.2) +
-  geom_line(data = optim_frontier, aes(x = sig_optim, y = retn_optim),
-            colour = "darkred", linewidth = 1.1) +
-  geom_point(data = opt_port, aes(x = PortSigma, y = PortMean),
+
+  # SMOOTH CURVE instead of jagged line
+  geom_line(data = smooth_curve,
+            aes(x = sig_optim, y = retn_optim),
+            colour = "darkred", linewidth = 1.3) +
+
+  geom_point(data = opt_port,
+             aes(x = PortSigma, y = PortMean),
              colour = "gold", size = 5, shape = 18) +
-  geom_point(data = mvp_port, aes(x = PortSigma, y = PortMean),
+
+  geom_point(data = mvp_port,
+             aes(x = PortSigma, y = PortMean),
              colour = "green4", size = 5, shape = 17) +
+
   annotate("text",
-           x     = opt_port$PortSigma + 0.001,
-           y     = opt_port$PortMean,
+           x = opt_port$PortSigma + 0.001,
+           y = opt_port$PortMean,
            label = sprintf("Optimal Portfolio\n(Sharpe = %.3f)", opt_port$Sharpe),
            hjust = 0, size = 3.2, colour = "darkgoldenrod") +
+
   annotate("text",
-           x     = mvp_port$PortSigma + 0.001,
-           y     = mvp_port$PortMean,
-           label = sprintf("Min Variance Portfolio\n(\u03c3 = %.4f)", mvp_port$PortSigma),
+           x = mvp_port$PortSigma + 0.001,
+           y = mvp_port$PortMean,
+           label = sprintf("Min Variance Portfolio\n(σ = %.4f)", mvp_port$PortSigma),
            hjust = 0, size = 3.2, colour = "green4") +
+
   labs(
-    title    = "Mean-Variance Portfolio Optimization via Simulation",
+    title = "Mean-Variance Portfolio Optimization via Simulation",
     subtitle = "GE, XOM, GBX, SBUX, PFE, HMC, NVDA | 2021-2024 | rf = 2% p.a.",
-    x        = "Portfolio Sigma (Monthly Std Dev)",
-    y        = "Portfolio Mean (Monthly Return)",
-    caption  = paste("Gold diamond = Optimal Portfolio (Max Sharpe)",
-                     "| Green triangle = Min Variance Portfolio")
+    x = "Portfolio Sigma (Monthly Std Dev)",
+    y = "Portfolio Mean (Monthly Return)",
+    caption = "Gold diamond = Optimal Portfolio | Green triangle = Min Variance Portfolio"
   ) +
   theme_minimal(base_size = 12) +
-  theme(plot.title   = element_text(face = "bold", size = 13),
-        plot.caption = element_text(size = 9, hjust = 0))
+  theme(plot.title = element_text(face = "bold", size = 13))
 ```
 
 # Analysis and Discussion
