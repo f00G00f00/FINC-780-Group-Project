@@ -195,43 +195,27 @@ The efficient frontier is traced by selecting the minimum-sigma portfolio within
 
 ```{r plot-frontier, fig.width=8, fig.height=5}
 # Bin by sigma (x-axis) and take the MAX return per bin -> upper envelope
-seqsig <- seq(min(Results$PortSigma),
-              max(Results$PortSigma),
-              length.out = 150)
+seqmret <- seq(round(min(Results$PortMean), 3) - .001,
+               max(Results$PortMean) + .001, .005)
 
 optim_frontier <- Results %>%
-  mutate(ints = cut(PortSigma, breaks = seqsig)) %>%
-  filter(!is.na(ints)) %>%
+  mutate(portnumber = row_number(),
+         ints       = cut(PortMean, breaks = seqmret)) %>%
   group_by(ints) %>%
-  summarise(sig_optim  = mean(PortSigma),
-            retn_optim = max(PortMean),
+  summarise(sig_optim  = min(PortSigma),
+            retn_optim = PortMean[which.min(PortSigma)],
             .groups    = "drop") %>%
-  arrange(sig_optim) %>%
-  filter(retn_optim >= mvp_port$PortMean)
+  filter(!is.na(ints)) %>%
+  arrange(retn_optim)
 
-# Polynomial regression for a guaranteed smooth parabolic arc
-poly_fit <- lm(retn_optim ~ poly(sig_optim, 3), data = optim_frontier)
-
-smooth_curve <- data.frame(
-  sig_optim = seq(min(optim_frontier$sig_optim),
-                  max(optim_frontier$sig_optim),
-                  length.out = 300)
-)
-smooth_curve$retn_optim <- predict(poly_fit, smooth_curve)
-
-# Plot
 ggplot() +
-  geom_point(data = Results,
-             aes(x = PortSigma, y = PortMean),
+  geom_point(data = Results, aes(x = PortSigma, y = PortMean),
              colour = "steelblue", alpha = 0.2, size = 1.2) +
-  geom_line(data = smooth_curve,
-            aes(x = sig_optim, y = retn_optim),
-            colour = "darkred", linewidth = 1.3) +
-  geom_point(data = opt_port,
-             aes(x = PortSigma, y = PortMean),
+  geom_point(data = optim_frontier, aes(x = sig_optim, y = retn_optim),
+             colour = "darkred", size = 2) +
+  geom_point(data = opt_port, aes(x = PortSigma, y = PortMean),
              colour = "gold", size = 5, shape = 18) +
-  geom_point(data = mvp_port,
-             aes(x = PortSigma, y = PortMean),
+  geom_point(data = mvp_port, aes(x = PortSigma, y = PortMean),
              colour = "green4", size = 5, shape = 17) +
   annotate("text",
            x     = opt_port$PortSigma + 0.001,
@@ -248,7 +232,8 @@ ggplot() +
     subtitle = "GE, XOM, GBX, SBUX, PFE, HMC, NVDA | 2021-2024 | rf = 2% p.a.",
     x        = "Portfolio Sigma (Monthly Std Dev)",
     y        = "Portfolio Mean (Monthly Return)",
-    caption  = "Gold diamond = Optimal Portfolio (Max Sharpe) | Green triangle = Min Variance Portfolio"
+    caption  = paste("Gold diamond = Optimal Portfolio (Max Sharpe)",
+                     "| Green triangle = Min Variance Portfolio")
   ) +
   theme_minimal(base_size = 12) +
   theme(plot.title   = element_text(face = "bold", size = 13),
